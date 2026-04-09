@@ -31,6 +31,7 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Operación técnica de Sprint 1](docs/05-sprint-1-operacion.md)
 - [Operación técnica de Sprint 2](docs/06-sprint-2-operacion.md)
 - [Prueba LlamaParse con SDK](docs/07-prueba-llamaparse-sdk.md)
+- [Estado actual y próximo sprint](docs/08-estado-actual-y-proximo-sprint.md)
 
 ## Resultado esperado al cierre
 
@@ -79,3 +80,7 @@ El pipeline ya incluye:
 La integración principal con LlamaParse usa el SDK oficial `llama_cloud`, igual que la prueba manual del proyecto.
 
 Los scripts Python del proyecto usan `.env` como fuente principal de configuración. Si un valor no se pasa por CLI, se toma desde ese archivo.
+
+## Próximo foco
+
+El siguiente sprint queda orientado a conectar el pipeline con IRIS real y validar una corrida completa con persistencia efectiva en base de datos.

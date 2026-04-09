@@ -105,18 +105,20 @@ Documentos parseados y normalizados con persistencia de intento y artefactos cru
 
 Valida el corazon funcional de la POC: parsing externo y normalización.
 
-## 5. Sprint 3 - Robustez operacional y trazabilidad completa
+## 5. Sprint 3 - Integración real con IRIS y robustez operacional
 
 ### Objetivo
 
-Cerrar el flujo transaccional, manejo de errores y visibilidad operacional para operar la POC con confianza.
+Conectar el pipeline a una instancia real de IRIS y cerrar el flujo transaccional, manejo de errores y visibilidad operacional para operar la POC con confianza.
 
 ### Resultado esperado
 
-Pipeline con estados completos, excepciones abiertas, reintentos controlados y consultas operacionales basicas.
+Pipeline funcionando contra IRIS real, con estados completos, persistencia verificable, excepciones abiertas, reintentos controlados y consultas operacionales basicas.
 
 ### Alcance
 
+- conexión real a IRIS vía DB-API;
+- validación del esquema físico en la instancia objetivo;
 - máquina de estados formalizada;
 - manejo centralizado de excepciones;
 - persistencia de `doc_exception`;
@@ -128,7 +130,9 @@ Pipeline con estados completos, excepciones abiertas, reintentos controlados y c
 
 ### Historias o tareas principales
 
-- implementar `orchestrator.py`;
+- validar `IrisRepository` contra instancia real;
+- correr `sql/001_init.sql` en IRIS;
+- implementar y verificar transacción por documento;
 - asegurar transacción por documento;
 - crear query pack para operación;
 - registrar `ERROR`, `REVIEW` y `DUPLICATE` de forma consistente;
@@ -136,6 +140,8 @@ Pipeline con estados completos, excepciones abiertas, reintentos controlados y c
 
 ### Criterios de aceptación
 
+- el worker procesa al menos un documento real contra IRIS;
+- las tablas objetivo reflejan la corrida real del documento;
 - cualquier error deja documento y base en estado consistente;
 - las excepciones quedan registradas con etapa y severidad;
 - la operación puede listar pendientes de revisión y errores abiertos;
@@ -200,6 +206,7 @@ Evita terminar con una implementación aislada sin narrativa de negocio ni camin
 ### Sprint 3
 
 - estabilización del flujo base ya funcionando;
+- instancia IRIS accesible y credenciales confirmadas;
 - reglas de severidad y manejo operacional acordadas.
 
 ### Sprint 4
@@ -219,7 +226,7 @@ Fin Sprint 2: parse y normalización funcionando.
 
 ### Hito 3
 
-Fin Sprint 3: trazabilidad y manejo de errores cerrados.
+Fin Sprint 3: conexión real a IRIS, trazabilidad y manejo de errores cerrados.
 
 ### Hito 4
 
