@@ -32,6 +32,9 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Operación técnica de Sprint 2](docs/06-sprint-2-operacion.md)
 - [Prueba LlamaParse con SDK](docs/07-prueba-llamaparse-sdk.md)
 - [Estado actual y próximo sprint](docs/08-estado-actual-y-proximo-sprint.md)
+- [Plan de ejecución de Sprint 3](docs/09-plan-sprint-3-ejecucion.md)
+- [Bootstrap y smoke test sobre iris105](docs/10-iris105-bootstrap-y-smoke-test.md)
+- [Plan de Sprint 4 sobre robustez operacional](docs/11-plan-sprint-4-robustez-operacional.md)
 
 ## Resultado esperado al cierre
 

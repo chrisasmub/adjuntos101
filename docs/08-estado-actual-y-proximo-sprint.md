@@ -2,91 +2,95 @@
 
 ## Estado actual del proyecto
 
-Al cierre de los primeros dos sprints, la POC ya cuenta con una base funcional real y validada para el flujo documental.
+Al cierre de esta sesión, la POC ya dejó de ser solo una integración local con persistencia simulada y quedó conectada a una instancia real de IRIS.
 
-### Avances completados
+## Avances completados
 
-- estructura base del proyecto Python lista para evolución;
-- configuración centralizada por `.env`;
-- scanner por carpeta con validación de estabilidad;
-- claim atómico hacia `Processing/<uuid>/`;
-- fingerprint con `sha256`, MIME y metadata base;
-- idempotencia por hash;
-- persistencia base de documentos y eventos en repositorio;
-- DDL inicial para IRIS en [sql/001_init.sql](/Users/christian/vscode/adjuntos101/sql/001_init.sql);
-- integración con LlamaParse mediante SDK oficial `llama_cloud`;
-- script de prueba manual con SDK en [scripts/test_llamaparse_sdk.py](/Users/christian/vscode/adjuntos101/scripts/test_llamaparse_sdk.py);
-- clasificación preliminar por heurísticas;
-- normalización a JSON canónico;
-- validación mínima por tipo documental;
-- archivado de artefactos en `Archive/`;
-- enrutamiento a `Processed`, `Review`, `Error` y duplicados.
+- worker Python funcional para escaneo, claim, parse, normalización y routing final;
+- integración real con LlamaParse mediante `llama_cloud`;
+- backend `iris` operativo vía `intersystems-irispython`;
+- conexión validada contra `iris105` en `localhost:1972`;
+- namespace operativo confirmado: `USER`;
+- esquema SQL aplicado en IRIS a partir de [sql/001_init.sql](/Users/christian/vscode/adjuntos101/sql/001_init.sql);
+- permisos DML concedidos al usuario de aplicación `admin`;
+- script reproducible de bootstrap en [scripts/bootstrap_iris_user.py](/Users/christian/vscode/adjuntos101/scripts/bootstrap_iris_user.py);
+- script reproducible de smoke test en [scripts/smoke_test_iris_worker.py](/Users/christian/vscode/adjuntos101/scripts/smoke_test_iris_worker.py);
+- guía operativa inicial en [docs/10-iris105-bootstrap-y-smoke-test.md](/Users/christian/vscode/adjuntos101/docs/10-iris105-bootstrap-y-smoke-test.md).
 
-### Validaciones realizadas
+## Validaciones realizadas
 
-- pruebas unitarias del fingerprint;
-- pruebas del flujo base del worker;
-- pruebas de normalización y validación;
-- prueba unitaria del cliente LlamaParse con shape real del SDK;
-- prueba real del script manual contra LlamaParse;
-- prueba end-to-end del worker usando `PARSER_MODE=llamaparse` y `DATABASE_MODE=noop`.
+- conexión DB-API directa usando `iris.connect(...)` con `admin / 123`;
+- conexión del proyecto usando `IrisRepository.from_settings()`;
+- aplicación real del DDL en `USER`;
+- validación de lectura sobre `doc_document`, `doc_parse_attempt`, `doc_normalized`, `doc_exception` y `doc_event`;
+- corrida real del worker con `DATABASE_MODE=iris` y `PARSER_MODE=mock`;
+- persistencia confirmada de documento, intento de parse, normalizado y eventos;
+- generación de artefactos reales en `Archive/`;
+- re-ejecución exitosa del bootstrap sin errores fatales sobre objetos ya existentes;
+- smoke test reusable ejecutado con resultado `PROCESSED`.
 
-### Resultado técnico actual
+## Resultado técnico actual
 
 Hoy el sistema ya puede:
 
 1. detectar un archivo;
 2. reclamarlo;
-3. parsearlo con LlamaParse;
+3. parsearlo;
 4. generar `parse_raw.json`, `parse.md` y `normalized.json`;
-5. decidir si el documento termina en `Processed` o `Review`.
+5. persistir en IRIS real;
+6. dejar el archivo final en `Processed` o `Review`;
+7. repetir un smoke test operativo sin depender del filesystem productivo.
+
+## Evidencia de la última validación real
+
+En la prueba más reciente del smoke test contra `iris105`:
+
+- `document_id=4`;
+- `current_status=PROCESSED`;
+- `parse_provider=mock`;
+- `parse_outcome=COMPLETED`;
+- `document_type=invoice`;
+- `review_required=False`;
+- `event_count=7`.
 
 ## Qué queda pendiente
 
-Todavía no está cerrada la integración real con IRIS en ambiente operativo.
+Todavía no está cerrada la parte de robustez operacional y consistencia transaccional del flujo.
 
 Pendientes principales:
 
-- conexión real a IRIS Community usando `intersystems-irispython`;
-- ejecución del DDL en la instancia objetivo;
-- persistencia real de `doc_document`, `doc_event`, `doc_parse_attempt` y `doc_normalized`;
-- verificación de transacciones por documento;
-- manejo operacional de errores y `doc_exception`;
-- consultas SQL iniciales para operación.
+- transacción por documento en `IrisRepository`;
+- persistencia real de `doc_exception`;
+- política de rollback ante fallas parciales;
+- reintentos acotados para parser y base de datos;
+- pruebas de integración automatizadas contra IRIS real;
+- consultas SQL operativas iniciales;
+- limpieza de valores sensibles en `.env.example`;
+- evidencia equivalente usando `PARSER_MODE=llamaparse` contra IRIS real.
 
 ## Próximo sprint
 
-El siguiente sprint queda enfocado explícitamente en **conectar el worker a IRIS real**.
+El siguiente sprint queda enfocado en **cerrar la robustez operacional sobre IRIS real**.
 
 ### Objetivo del próximo sprint
 
-Dejar el pipeline funcionando contra una instancia real de IRIS, con persistencia transaccional y trazabilidad consultable.
+Dejar el pipeline consistente ante éxito y error, con excepciones registradas, rollback verificable y evidencia real usando LlamaParse más IRIS.
 
 ### Alcance propuesto
 
-- instalar y validar el driver `intersystems-irispython`;
-- configurar conexión real desde `.env`;
-- ejecutar [sql/001_init.sql](/Users/christian/vscode/adjuntos101/sql/001_init.sql) en IRIS;
-- probar inserciones y lecturas reales desde `IrisRepository`;
-- correr el worker con `DATABASE_MODE=iris`;
-- validar persistencia de documentos, eventos, intentos y normalizados;
-- preparar consultas SQL operativas básicas;
-- dejar evidencia de una corrida real extremo a extremo con IRIS.
+- refactorizar `IrisRepository` para manejar transacción por documento;
+- eliminar `commit()` por operación y definir frontera transaccional explícita;
+- implementar apertura y cierre de `doc_exception`;
+- distinguir fallas terminales versus fallas reintentables;
+- agregar reintentos controlados para parser y DB;
+- preparar un set de queries operativas básicas;
+- ejecutar al menos una corrida real con `PARSER_MODE=llamaparse` y `DATABASE_MODE=iris`;
+- corregir `.env.example` para reemplazar valores sensibles por placeholders.
 
 ### Criterios de aceptación del próximo sprint
 
-- el worker procesa al menos un documento real contra IRIS;
-- `doc_document` refleja el estado final del documento;
-- `doc_event` registra la secuencia operacional;
-- `doc_parse_attempt` guarda el intento real de parse;
-- `doc_normalized` guarda el resultado normalizado;
-- el flujo deja evidencia reproducible para demo y soporte.
-
-## Recomendación operativa
-
-Antes de arrancar el próximo sprint conviene confirmar:
-
-- host, puerto, namespace y credenciales de IRIS;
-- si IRIS correrá en Docker o instalación local;
-- si el esquema se aplicará sobre `USER` o `DOCSPOC`;
-- qué documento real se usará como caso base de validación.
+- una corrida exitosa deja persistencia coherente sin estados parciales;
+- una falla inducida deja rollback o excepción abierta según política definida;
+- `doc_exception` queda poblada para errores reales del pipeline;
+- operación puede consultar documentos en `Review`, errores y últimos intentos;
+- existe evidencia reproducible de una corrida real con LlamaParse e IRIS.
