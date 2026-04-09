@@ -31,22 +31,33 @@ llamacloud = ["llama-cloud>=1.6.0"]
 python3 -m pip install -e '.[llamacloud]'
 ```
 
-2. Exportar API key sin hardcodearla en el repo:
+2. Configurar `.env`.
+
+El script ahora lee por defecto:
+
+- `LLAMAPARSE_API_KEY`
+- `LLAMAPARSE_COMPLEX_TIER`
+- `LLAMAPARSE_VERSION`
+
+desde el archivo `.env`.
+
+3. Opcionalmente, exportar una API key para sobreescribir `.env`:
 
 ```bash
 export LLAMA_CLOUD_API_KEY='tu_api_key'
 ```
 
-3. Ejecutar la prueba:
+4. Ejecutar la prueba:
 
 ```bash
-python3 scripts/test_llamaparse_sdk.py ./my_document.pdf --tier agentic --output-file /tmp/llamaparse.md
+python3 scripts/test_llamaparse_sdk.py ./my_document.pdf --output-file /tmp/llamaparse.md
 ```
 
 ## Notas
 
 - El script acepta `LLAMA_CLOUD_API_KEY` o `LLAMAPARSE_API_KEY`.
-- Usa `version=latest` por defecto.
+- Si no pasas `--tier` o `--version`, usa `.env`.
+- También acepta `--env-file` para apuntar a otro archivo de configuración.
 - Si `markdown_full` no viene en la respuesta, hace fallback a `markdown`.
 
 ## Fuente base usada

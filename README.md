@@ -75,3 +75,5 @@ El pipeline ya incluye:
 - validación de campos mínimos;
 - archivado de artefactos en `Archive/`;
 - enrutamiento a `Processed` o `Review`.
+
+Los scripts Python del proyecto usan `.env` como fuente principal de configuración. Si un valor no se pasa por CLI, se toma desde ese archivo.

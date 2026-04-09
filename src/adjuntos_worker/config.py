@@ -1,4 +1,5 @@
 import os
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -14,8 +15,24 @@ def _parse_dotenv(path: Path) -> Dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip("\"'")
+        values[key.strip()] = _normalize_env_value(value.strip())
     return values
+
+
+def _normalize_env_value(value: str) -> str:
+    if value == "":
+        return ""
+
+    try:
+        tokens = shlex.split(value, posix=True)
+    except ValueError:
+        return value.strip().strip("\"'")
+
+    if not tokens:
+        return ""
+    if len(tokens) == 1:
+        return tokens[0]
+    return " ".join(tokens)
 
 
 def _get(env: Dict[str, str], key: str, default: Optional[str] = None) -> str:
