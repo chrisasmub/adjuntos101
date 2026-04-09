@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 iris = ["intersystems-irispython>=3.8"]
+llamacloud = ["llama-cloud>=1.6.0"]
 
 [project.scripts]
 adjuntos-worker = "adjuntos_worker.cli:main"
@@ -21,4 +22,3 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

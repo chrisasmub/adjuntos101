@@ -30,6 +30,7 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Backlog, criterios y riesgos](docs/04-backlog-criterios-y-riesgos.md)
 - [Operación técnica de Sprint 1](docs/05-sprint-1-operacion.md)
 - [Operación técnica de Sprint 2](docs/06-sprint-2-operacion.md)
+- [Prueba LlamaParse con SDK](docs/07-prueba-llamaparse-sdk.md)
 
 ## Resultado esperado al cierre
 
