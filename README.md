@@ -29,6 +29,7 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Plan de implementación por sprints](docs/03-plan-sprints.md)
 - [Backlog, criterios y riesgos](docs/04-backlog-criterios-y-riesgos.md)
 - [Operación técnica de Sprint 1](docs/05-sprint-1-operacion.md)
+- [Operación técnica de Sprint 2](docs/06-sprint-2-operacion.md)
 
 ## Resultado esperado al cierre
 
@@ -61,3 +62,15 @@ PYTHONPATH=src python3 -m adjuntos_worker --env-file .env --run-once
 ```
 
 Para validación sin IRIS, cambiar `DATABASE_MODE=noop` en `.env`.
+
+## Sprint 2 implementado
+
+El pipeline ya incluye:
+
+- clasificación preliminar y selección de tier;
+- cliente `mock` y cliente `llamaparse`;
+- parseo con persistencia de `doc_parse_attempt`;
+- normalización a JSON canónico;
+- validación de campos mínimos;
+- archivado de artefactos en `Archive/`;
+- enrutamiento a `Processed` o `Review`.

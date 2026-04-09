@@ -72,6 +72,18 @@ class DatabaseSettings:
 
 
 @dataclass(frozen=True)
+class ParseSettings:
+    mode: str
+    api_key: str
+    base_url: str
+    default_tier: str
+    complex_tier: str
+    version: str
+    poll_seconds: int
+    timeout_seconds: int
+
+
+@dataclass(frozen=True)
 class LoggingSettings:
     level: str
 
@@ -81,6 +93,7 @@ class AppConfig:
     paths: PathSettings
     worker: WorkerSettings
     database: DatabaseSettings
+    parse: ParseSettings
     logging: LoggingSettings
 
 
@@ -116,12 +129,23 @@ def load_config(env_file: str = ".env") -> AppConfig:
         password=_get(env_values, "IRIS_PASSWORD", ""),
     )
 
+    parse_settings = ParseSettings(
+        mode=_get(env_values, "PARSER_MODE", "mock").lower(),
+        api_key=_get(env_values, "LLAMAPARSE_API_KEY", ""),
+        base_url=_get(env_values, "LLAMAPARSE_BASE_URL", "https://api.cloud.llamaindex.ai/api/v2"),
+        default_tier=_get(env_values, "LLAMAPARSE_DEFAULT_TIER", "cost_effective"),
+        complex_tier=_get(env_values, "LLAMAPARSE_COMPLEX_TIER", "agentic"),
+        version=_get(env_values, "LLAMAPARSE_VERSION", "latest"),
+        poll_seconds=_get_int(env_values, "LLAMAPARSE_POLL_SECONDS", 5),
+        timeout_seconds=_get_int(env_values, "LLAMAPARSE_TIMEOUT_SECONDS", 300),
+    )
+
     logging_settings = LoggingSettings(level=_get(env_values, "LOG_LEVEL", "INFO").upper())
 
     return AppConfig(
         paths=path_settings,
         worker=worker_settings,
         database=database_settings,
+        parse=parse_settings,
         logging=logging_settings,
     )
-

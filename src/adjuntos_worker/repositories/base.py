@@ -1,6 +1,12 @@
 from typing import Optional, Protocol
 
-from adjuntos_worker.models import DocumentRecord, FileFingerprint
+from adjuntos_worker.models import (
+    DocumentRecord,
+    FileFingerprint,
+    NormalizedDocument,
+    ParseAttemptRecord,
+    ParseResult,
+)
 
 
 class Repository(Protocol):
@@ -35,6 +41,22 @@ class Repository(Protocol):
     def get_document(self, document_id: int) -> DocumentRecord:
         ...
 
-    def close(self) -> None:
+    def create_parse_attempt(
+        self,
+        document_id: int,
+        parse_result: ParseResult,
+        raw_json_path: str,
+        raw_markdown_path: str,
+    ) -> int:
         ...
 
+    def save_normalized_document(
+        self,
+        document_id: int,
+        normalized_document: NormalizedDocument,
+        normalized_json_path: str,
+    ) -> None:
+        ...
+
+    def close(self) -> None:
+        ...

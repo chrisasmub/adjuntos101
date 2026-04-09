@@ -5,8 +5,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from adjuntos_worker.config import AppConfig, DatabaseSettings, LoggingSettings, PathSettings, WorkerSettings
+from adjuntos_worker.config import (
+    AppConfig,
+    DatabaseSettings,
+    LoggingSettings,
+    ParseSettings,
+    PathSettings,
+    WorkerSettings,
+)
 from adjuntos_worker.orchestrator import WorkerApp
+from adjuntos_worker.parse_clients.mock import MockParseClient
 from adjuntos_worker.repositories.noop import NoopRepository
 
 
@@ -36,45 +44,78 @@ class WorkerAppTests(unittest.TestCase):
             username="USER",
             password="",
         )
+        parse = ParseSettings(
+            mode="mock",
+            api_key="",
+            base_url="https://api.cloud.llamaindex.ai/api/v2",
+            default_tier="cost_effective",
+            complex_tier="agentic",
+            version="latest",
+            poll_seconds=1,
+            timeout_seconds=10,
+        )
         logging = LoggingSettings(level="INFO")
-        return AppConfig(paths=paths, worker=worker, database=database, logging=logging)
+        return AppConfig(paths=paths, worker=worker, database=database, parse=parse, logging=logging)
 
     def test_run_once_processes_file_and_updates_repository(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             base_dir = Path(tmp_dir)
             config = self._build_config(base_dir)
             repository = NoopRepository()
-            app = WorkerApp(config, repository)
+            app = WorkerApp(config, repository, MockParseClient())
 
             config.paths.in_dir.mkdir(parents=True, exist_ok=True)
             file_path = config.paths.in_dir / "sample.pdf"
-            file_path.write_bytes(b"content-1")
+            file_path.write_text(
+                "\n".join(
+                    [
+                        "Factura Electronica",
+                        "Emisor: ACME SpA",
+                        "Fecha Emision: 2026-04-01",
+                        "Moneda: CLP",
+                        "Monto Total: 12345",
+                        "Numero Documento: F-100",
+                    ]
+                ),
+                encoding="utf-8",
+            )
 
             processed_count = app.run_once()
 
             self.assertEqual(processed_count, 1)
             self.assertEqual(len(repository.documents), 1)
+            self.assertEqual(len(repository.parse_attempts), 1)
+            self.assertEqual(len(repository.normalized_documents), 1)
 
             record = repository.get_document(1)
             self.assertEqual(record.current_status, "PROCESSED")
             self.assertTrue(Path(record.archive_path).exists())
-            self.assertIn("Processed", record.archive_path)
+            self.assertTrue((Path(record.archive_path) / "normalized.json").exists())
+
+            processed_files = list(config.paths.processed_dir.rglob("sample.pdf"))
+            self.assertEqual(len(processed_files), 1)
 
     def test_run_once_routes_duplicate_to_duplicates_folder(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             base_dir = Path(tmp_dir)
             config = self._build_config(base_dir)
             repository = NoopRepository()
-            app = WorkerApp(config, repository)
+            app = WorkerApp(config, repository, MockParseClient())
 
             config.paths.in_dir.mkdir(parents=True, exist_ok=True)
 
             first_file = config.paths.in_dir / "first.pdf"
-            first_file.write_bytes(b"same-content")
+            first_file.write_text(
+                "Factura Electronica\nEmisor: Demo\nFecha Emision: 2026-04-02\nMoneda: CLP\nMonto Total: 2000",
+                encoding="utf-8",
+            )
             app.run_once()
 
             second_file = config.paths.in_dir / "second.pdf"
-            second_file.write_bytes(b"same-content")
+            second_file.write_text(
+                "Factura Electronica\nEmisor: Demo\nFecha Emision: 2026-04-02\nMoneda: CLP\nMonto Total: 2000",
+                encoding="utf-8",
+            )
             processed_count = app.run_once()
 
             self.assertEqual(processed_count, 1)
@@ -83,7 +124,40 @@ class WorkerAppTests(unittest.TestCase):
             duplicates = list(config.paths.duplicates_dir.rglob("second.pdf"))
             self.assertEqual(len(duplicates), 1)
 
+    def test_run_once_routes_incomplete_document_to_review(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base_dir = Path(tmp_dir)
+            config = self._build_config(base_dir)
+            repository = NoopRepository()
+            app = WorkerApp(config, repository, MockParseClient())
+
+            config.paths.in_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = config.paths.in_dir / "statement.pdf"
+            file_path.write_text(
+                "\n".join(
+                    [
+                        "Estado de cuenta tarjeta",
+                        "Emisor: Banco Demo",
+                        "Moneda: CLP",
+                        "Cuenta: 1234",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            processed_count = app.run_once()
+
+            self.assertEqual(processed_count, 1)
+            record = repository.get_document(1)
+            self.assertEqual(record.current_status, "REVIEW")
+            self.assertTrue(Path(record.archive_path).exists())
+            self.assertTrue((Path(record.archive_path) / "parse.md").exists())
+            self.assertTrue(repository.normalized_documents[1]["review_required"])
+
+            review_files = list(config.paths.review_dir.rglob("statement.pdf"))
+            self.assertEqual(len(review_files), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
-

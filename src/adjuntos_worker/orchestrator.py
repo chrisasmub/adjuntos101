@@ -1,23 +1,30 @@
 import logging
 import time
+from dataclasses import replace
 from typing import Optional
 
+from adjuntos_worker.classifier import classify_document
 from adjuntos_worker.claimer import claim_file
 from adjuntos_worker.config import AppConfig
 from adjuntos_worker.filesystem import (
+    create_archive_bundle,
     ensure_runtime_directories,
     finalize_duplicate,
     finalize_error,
+    finalize_review,
     finalize_success,
 )
 from adjuntos_worker.fingerprint import fingerprint_file
+from adjuntos_worker.normalizer import normalize_document
 from adjuntos_worker.scanner import is_file_stable, scan_candidates
+from adjuntos_worker.validator import apply_validation_result, validate_normalized_document
 
 
 class WorkerApp:
-    def __init__(self, config: AppConfig, repository) -> None:
+    def __init__(self, config: AppConfig, repository, parser) -> None:
         self.config = config
         self.repository = repository
+        self.parser = parser
         self.logger = logging.getLogger("adjuntos_worker")
 
     def run_forever(self) -> None:
@@ -107,31 +114,133 @@ class WorkerApp:
                 event_type="CLAIMED",
                 message="File moved to {0}".format(claimed_file.claimed_path),
             )
-
-            processed_path = finalize_success(
-                claimed_file, fingerprint, self.config.paths.processed_dir
-            )
-            self.repository.update_document_status(
-                document_id,
-                current_status="PROCESSED",
-                archive_path=str(processed_path),
+            classification = classify_document(
+                claimed_file.claimed_path,
+                text="",
+                parse_settings=self.config.parse,
             )
             self.repository.append_event(
                 document_id,
-                stage="INTAKE",
-                event_type="PROCESSED",
-                message="Sprint 1 intake completed. File stored at {0}".format(processed_path),
+                stage="CLASSIFICATION",
+                event_type="CLASSIFIED",
+                message="Initial type={0}, tier={1}. {2}".format(
+                    classification.document_type,
+                    classification.provider_tier,
+                    classification.rationale,
+                ),
             )
-            self.logger.info(
-                "File processed successfully",
-                extra={
-                    "document_id": document_id,
-                    "attachment_hash": fingerprint.sha256,
-                    "event_type": "PROCESSED",
-                    "path": str(processed_path),
-                    "status": "PROCESSED",
-                },
+            self.repository.update_document_status(document_id, current_status="PARSING")
+            self.repository.append_event(
+                document_id,
+                stage="PARSING",
+                event_type="PARSING_STARTED",
+                message="Submitting document to parser provider {0}".format(self.parser.provider_name),
             )
+
+            parse_result = self.parser.parse(claimed_file.claimed_path, classification)
+            classification = classify_document(
+                claimed_file.claimed_path,
+                text=parse_result.markdown,
+                parse_settings=self.config.parse,
+            )
+            normalized_document = normalize_document(classification, parse_result)
+            validation = validate_normalized_document(normalized_document)
+            normalized_document = apply_validation_result(normalized_document, validation)
+
+            archive_bundle = create_archive_bundle(
+                claimed_file=claimed_file,
+                fingerprint=fingerprint,
+                archive_dir=self.config.paths.archive_dir,
+                parse_result=parse_result,
+                normalized_document=normalized_document,
+            )
+            self.repository.create_parse_attempt(
+                document_id=document_id,
+                parse_result=parse_result,
+                raw_json_path=str(archive_bundle / "parse_raw.json"),
+                raw_markdown_path=str(archive_bundle / "parse.md"),
+            )
+            self.repository.update_document_status(document_id, current_status="PARSED")
+            self.repository.append_event(
+                document_id,
+                stage="PARSING",
+                event_type="PARSED",
+                message="Parser returned outcome {0}.".format(parse_result.outcome),
+            )
+            self.repository.save_normalized_document(
+                document_id=document_id,
+                normalized_document=normalized_document,
+                normalized_json_path=str(archive_bundle / "normalized.json"),
+            )
+            self.repository.update_document_status(
+                document_id,
+                current_status="NORMALIZED",
+                archive_path=str(archive_bundle),
+            )
+            self.repository.append_event(
+                document_id,
+                stage="NORMALIZATION",
+                event_type="NORMALIZED",
+                message="Document normalized as {0}.".format(normalized_document.document_type),
+            )
+            self.repository.update_document_status(document_id, current_status="VALIDATED")
+            self.repository.append_event(
+                document_id,
+                stage="VALIDATION",
+                event_type="VALIDATED",
+                message=validation.notes or "Document passed required-field validation.",
+            )
+
+            if normalized_document.review_required:
+                review_path = finalize_review(
+                    claimed_file, fingerprint, self.config.paths.review_dir
+                )
+                self.repository.update_document_status(
+                    document_id,
+                    current_status="REVIEW",
+                    archive_path=str(archive_bundle),
+                )
+                self.repository.append_event(
+                    document_id,
+                    stage="VALIDATION",
+                    event_type="REVIEW_REQUIRED",
+                    message="Document sent to Review at {0}".format(review_path),
+                )
+                self.logger.info(
+                    "File sent to review",
+                    extra={
+                        "document_id": document_id,
+                        "attachment_hash": fingerprint.sha256,
+                        "event_type": "REVIEW_REQUIRED",
+                        "path": str(review_path),
+                        "status": "REVIEW",
+                    },
+                )
+            else:
+                processed_path = finalize_success(
+                    claimed_file, fingerprint, self.config.paths.processed_dir
+                )
+                self.repository.update_document_status(
+                    document_id,
+                    current_status="PROCESSED",
+                    archive_path=str(archive_bundle),
+                )
+                self.repository.append_event(
+                    document_id,
+                    stage="VALIDATION",
+                    event_type="PROCESSED",
+                    message="Document stored at {0}".format(processed_path),
+                )
+                self.logger.info(
+                    "File processed successfully",
+                    extra={
+                        "document_id": document_id,
+                        "attachment_hash": fingerprint.sha256,
+                        "event_type": "PROCESSED",
+                        "path": str(processed_path),
+                        "status": "PROCESSED",
+                    },
+                )
             return True
 
         except Exception:

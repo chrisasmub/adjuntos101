@@ -3,6 +3,7 @@ import argparse
 from adjuntos_worker.config import load_config
 from adjuntos_worker.logging_utils import configure_logging
 from adjuntos_worker.orchestrator import WorkerApp
+from adjuntos_worker.parse_clients import LlamaParseClient, MockParseClient
 from adjuntos_worker.repositories import IrisRepository, NoopRepository
 
 
@@ -12,6 +13,14 @@ def _build_repository(config):
     if config.database.mode == "iris":
         return IrisRepository.from_settings(config.database)
     raise ValueError("Unsupported DATABASE_MODE: {0}".format(config.database.mode))
+
+
+def _build_parser(config):
+    if config.parse.mode == "mock":
+        return MockParseClient()
+    if config.parse.mode == "llamaparse":
+        return LlamaParseClient(config.parse)
+    raise ValueError("Unsupported PARSER_MODE: {0}".format(config.parse.mode))
 
 
 def main() -> int:
@@ -27,7 +36,8 @@ def main() -> int:
     config = load_config(args.env_file)
     configure_logging(config.logging.level)
     repository = _build_repository(config)
-    app = WorkerApp(config, repository)
+    parser = _build_parser(config)
+    app = WorkerApp(config, repository, parser)
 
     try:
         if args.run_once:
@@ -37,4 +47,3 @@ def main() -> int:
         return 0
     finally:
         app.close()
-

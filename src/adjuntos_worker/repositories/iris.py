@@ -2,7 +2,12 @@ from datetime import datetime
 from typing import Optional
 
 from adjuntos_worker.config import DatabaseSettings
-from adjuntos_worker.models import DocumentRecord, FileFingerprint
+from adjuntos_worker.models import (
+    DocumentRecord,
+    FileFingerprint,
+    NormalizedDocument,
+    ParseResult,
+)
 
 
 class IrisRepository:
@@ -134,6 +139,134 @@ class IrisRepository:
             current_status=str(row[8]),
         )
 
+    def create_parse_attempt(
+        self,
+        document_id: int,
+        parse_result: ParseResult,
+        raw_json_path: str,
+        raw_markdown_path: str,
+    ) -> int:
+        cursor = self._connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO doc_parse_attempt
+                (document_id, provider, provider_job_id, provider_tier, provider_version,
+                 started_at, completed_at, outcome, raw_json_path, raw_markdown_path,
+                 error_code, error_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                document_id,
+                parse_result.provider,
+                parse_result.provider_job_id,
+                parse_result.provider_tier,
+                parse_result.provider_version,
+                parse_result.started_at,
+                parse_result.completed_at,
+                parse_result.outcome,
+                raw_json_path,
+                raw_markdown_path,
+                None,
+                None,
+            ),
+        )
+        self._connection.commit()
+        cursor.execute(
+            """
+            SELECT parse_attempt_id
+              FROM doc_parse_attempt
+             WHERE document_id = ? AND provider_job_id = ?
+            """,
+            (document_id, parse_result.provider_job_id),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError("IRIS insert completed but parse_attempt_id could not be retrieved.")
+        return int(row[0])
+
+    def save_normalized_document(
+        self,
+        document_id: int,
+        normalized_document: NormalizedDocument,
+        normalized_json_path: str,
+    ) -> None:
+        cursor = self._connection.cursor()
+        cursor.execute(
+            "SELECT document_id FROM doc_normalized WHERE document_id = ?",
+            (document_id,),
+        )
+        exists = cursor.fetchone() is not None
+        payload = (
+            normalized_document.document_type,
+            normalized_document.issuer_name,
+            normalized_document.issuer_tax_id,
+            normalized_document.issue_date,
+            normalized_document.due_date,
+            normalized_document.period_from,
+            normalized_document.period_to,
+            normalized_document.currency,
+            normalized_document.total_amount,
+            normalized_document.balance_amount,
+            normalized_document.account_ref_last4,
+            normalized_document.document_number,
+            normalized_document.confidence,
+            1 if normalized_document.review_required else 0,
+            normalized_json_path,
+            document_id,
+        )
+        if exists:
+            cursor.execute(
+                """
+                UPDATE doc_normalized
+                   SET document_type = ?,
+                       issuer_name = ?,
+                       issuer_tax_id = ?,
+                       issue_date = ?,
+                       due_date = ?,
+                       period_from = ?,
+                       period_to = ?,
+                       currency = ?,
+                       total_amount = ?,
+                       balance_amount = ?,
+                       account_ref_last4 = ?,
+                       document_number = ?,
+                       confidence = ?,
+                       review_required = ?,
+                       normalized_json_path = ?
+                 WHERE document_id = ?
+                """,
+                payload,
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT INTO doc_normalized
+                    (document_id, document_type, issuer_name, issuer_tax_id, issue_date,
+                     due_date, period_from, period_to, currency, total_amount, balance_amount,
+                     account_ref_last4, document_number, confidence, review_required,
+                     normalized_json_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    document_id,
+                    normalized_document.document_type,
+                    normalized_document.issuer_name,
+                    normalized_document.issuer_tax_id,
+                    normalized_document.issue_date,
+                    normalized_document.due_date,
+                    normalized_document.period_from,
+                    normalized_document.period_to,
+                    normalized_document.currency,
+                    normalized_document.total_amount,
+                    normalized_document.balance_amount,
+                    normalized_document.account_ref_last4,
+                    normalized_document.document_number,
+                    normalized_document.confidence,
+                    1 if normalized_document.review_required else 0,
+                    normalized_json_path,
+                ),
+            )
+        self._connection.commit()
+
     def close(self) -> None:
         self._connection.close()
-

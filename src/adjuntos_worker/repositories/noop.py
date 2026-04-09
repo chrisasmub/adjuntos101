@@ -1,15 +1,24 @@
 from dataclasses import replace
 from typing import Dict, List, Optional
 
-from adjuntos_worker.models import DocumentRecord, FileFingerprint
+from adjuntos_worker.models import (
+    DocumentRecord,
+    FileFingerprint,
+    NormalizedDocument,
+    ParseAttemptRecord,
+    ParseResult,
+)
 
 
 class NoopRepository:
     def __init__(self) -> None:
         self._next_id = 1
+        self._next_parse_attempt_id = 1
         self.documents: Dict[int, DocumentRecord] = {}
         self.hash_index: Dict[str, int] = {}
         self.events: List[dict] = []
+        self.parse_attempts: Dict[int, ParseAttemptRecord] = {}
+        self.normalized_documents: Dict[int, dict] = {}
 
     def get_document_id_by_hash(self, attachment_hash: str) -> Optional[int]:
         return self.hash_index.get(attachment_hash)
@@ -69,6 +78,37 @@ class NoopRepository:
     def get_document(self, document_id: int) -> DocumentRecord:
         return self.documents[document_id]
 
+    def create_parse_attempt(
+        self,
+        document_id: int,
+        parse_result: ParseResult,
+        raw_json_path: str,
+        raw_markdown_path: str,
+    ) -> int:
+        parse_attempt_id = self._next_parse_attempt_id
+        self._next_parse_attempt_id += 1
+        self.parse_attempts[parse_attempt_id] = ParseAttemptRecord(
+            parse_attempt_id=parse_attempt_id,
+            document_id=document_id,
+            provider=parse_result.provider,
+            provider_job_id=parse_result.provider_job_id,
+            provider_tier=parse_result.provider_tier,
+            provider_version=parse_result.provider_version,
+            outcome=parse_result.outcome,
+            raw_json_path=raw_json_path,
+            raw_markdown_path=raw_markdown_path,
+        )
+        return parse_attempt_id
+
+    def save_normalized_document(
+        self,
+        document_id: int,
+        normalized_document: NormalizedDocument,
+        normalized_json_path: str,
+    ) -> None:
+        payload = normalized_document.to_dict()
+        payload["normalized_json_path"] = normalized_json_path
+        self.normalized_documents[document_id] = payload
+
     def close(self) -> None:
         return None
-
