@@ -7,7 +7,7 @@ Sprint 2 agrega el flujo documental principal sobre la base del Sprint 1:
 - clasificación preliminar por nombre y keywords;
 - cliente de parse con dos modos:
   - `mock` para desarrollo local y pruebas;
-  - `llamaparse` para integración real con API v2;
+  - `llamaparse` para integración real con SDK oficial `llama_cloud`;
 - almacenamiento de artefactos en `Archive/YYYY/MM/DD/<sha256>/`;
 - persistencia de `doc_parse_attempt`;
 - normalización a JSON canónico;
@@ -71,10 +71,10 @@ LLAMAPARSE_COMPLEX_TIER=agentic
 LLAMAPARSE_VERSION=latest
 ```
 
-El worker usa:
+El worker usa el SDK oficial `AsyncLlamaCloud`, que encapsula upload y polling del parse.
 
-- `POST /parse/upload` para subir el archivo;
-- `GET /parse/{job_id}?expand=markdown,items` para polling y resultado.
+Nota:
+si `LLAMAPARSE_BASE_URL` viene con el valor legacy `https://api.cloud.llamaindex.ai/api/v2`, el cliente lo normaliza automáticamente al host que espera el SDK.
 
 ## Notas de alcance de Sprint 2
 

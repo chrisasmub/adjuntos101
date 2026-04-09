@@ -76,4 +76,6 @@ El pipeline ya incluye:
 - archivado de artefactos en `Archive/`;
 - enrutamiento a `Processed` o `Review`.
 
+La integración principal con LlamaParse usa el SDK oficial `llama_cloud`, igual que la prueba manual del proyecto.
+
 Los scripts Python del proyecto usan `.env` como fuente principal de configuración. Si un valor no se pasa por CLI, se toma desde ese archivo.
