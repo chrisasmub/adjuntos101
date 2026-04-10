@@ -35,6 +35,8 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Plan de ejecución de Sprint 3](docs/09-plan-sprint-3-ejecucion.md)
 - [Bootstrap y smoke test sobre iris105](docs/10-iris105-bootstrap-y-smoke-test.md)
 - [Plan de Sprint 4 sobre robustez operacional](docs/11-plan-sprint-4-robustez-operacional.md)
+- [Cierre Sprint 4 y plan de Sprint 5](docs/12-cierre-sprint-4-y-plan-sprint-5-web-console.md)
+- [Query pack operativo sobre IRIS](sql/010_operational_queries.sql)
 
 ## Resultado esperado al cierre
 
@@ -68,6 +70,25 @@ PYTHONPATH=src python3 -m adjuntos_worker --env-file .env --run-once
 
 Para validación sin IRIS, cambiar `DATABASE_MODE=noop` en `.env`.
 
+### Consola web
+
+Para consultar documentos ya persistidos en IRIS desde navegador:
+
+```bash
+PYTHONPATH=src python3 -m adjuntos_worker.webapp --env-file .env --host 127.0.0.1 --port 8080
+```
+
+O usando el script instalado:
+
+```bash
+adjuntos-web --env-file .env --host 127.0.0.1 --port 8080
+```
+
+La app expone:
+
+- `/` listado filtrable de documentos;
+- `/documents/<id>` detalle con normalizado, parse attempts, eventos y excepciones.
+
 ## Sprint 2 implementado
 
 El pipeline ya incluye:
@@ -86,4 +107,8 @@ Los scripts Python del proyecto usan `.env` como fuente principal de configuraci
 
 ## Próximo foco
 
-El siguiente sprint queda orientado a conectar el pipeline con IRIS real y validar una corrida completa con persistencia efectiva en base de datos.
+El siguiente sprint queda orientado a cerrar la consola operacional sobre IRIS:
+
+- resolver el error de detalle en `/documents/<id>`;
+- robustecer la capa de lectura para la web;
+- exponer mejor parse attempts, eventos, excepciones y artefactos desde navegador.

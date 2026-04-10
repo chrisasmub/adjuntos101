@@ -16,6 +16,7 @@ llamacloud = ["llama-cloud>=1.6.0"]
 
 [project.scripts]
 adjuntos-worker = "adjuntos_worker.cli:main"
+adjuntos-web = "adjuntos_worker.webapp:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

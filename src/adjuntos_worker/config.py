@@ -98,6 +98,8 @@ class ParseSettings:
     version: str
     poll_seconds: int
     timeout_seconds: int
+    max_retries: int = 2
+    retry_backoff_seconds: int = 2
 
 
 @dataclass(frozen=True)
@@ -155,6 +157,8 @@ def load_config(env_file: str = ".env") -> AppConfig:
         version=_get(env_values, "LLAMAPARSE_VERSION", "latest"),
         poll_seconds=_get_int(env_values, "LLAMAPARSE_POLL_SECONDS", 5),
         timeout_seconds=_get_int(env_values, "LLAMAPARSE_TIMEOUT_SECONDS", 300),
+        max_retries=_get_int(env_values, "LLAMAPARSE_MAX_RETRIES", 2),
+        retry_backoff_seconds=_get_int(env_values, "LLAMAPARSE_RETRY_BACKOFF_SECONDS", 2),
     )
 
     logging_settings = LoggingSettings(level=_get(env_values, "LOG_LEVEL", "INFO").upper())

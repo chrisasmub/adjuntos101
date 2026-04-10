@@ -25,6 +25,19 @@ class ExplodingParseClient:
         raise RuntimeError("Synthetic parser failure")
 
 
+class FlakyParseClient:
+    provider_name = "flaky"
+
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    def parse(self, path, classification):
+        self.attempts += 1
+        if self.attempts == 1:
+            raise TimeoutError("Synthetic timeout")
+        return MockParseClient().parse(path, classification)
+
+
 class WorkerAppTests(unittest.TestCase):
     def _build_config(self, base_dir: Path) -> AppConfig:
         paths = PathSettings(
@@ -60,6 +73,8 @@ class WorkerAppTests(unittest.TestCase):
             version="latest",
             poll_seconds=1,
             timeout_seconds=10,
+            max_retries=2,
+            retry_backoff_seconds=0,
         )
         logging = LoggingSettings(level="INFO")
         return AppConfig(paths=paths, worker=worker, database=database, parse=parse, logging=logging)
@@ -208,6 +223,38 @@ class WorkerAppTests(unittest.TestCase):
 
             error_files = list(config.paths.error_dir.rglob("broken.pdf"))
             self.assertEqual(len(error_files), 1)
+
+    def test_run_once_retries_transient_parser_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base_dir = Path(tmp_dir)
+            config = self._build_config(base_dir)
+            repository = NoopRepository()
+            parser = FlakyParseClient()
+            app = WorkerApp(config, repository, parser)
+
+            config.paths.in_dir.mkdir(parents=True, exist_ok=True)
+            file_path = config.paths.in_dir / "retry.pdf"
+            file_path.write_text(
+                "\n".join(
+                    [
+                        "Factura Electronica",
+                        "Emisor: Retry Demo",
+                        "Fecha Emision: 2026-04-03",
+                        "Moneda: CLP",
+                        "Monto Total: 1000",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            processed_count = app.run_once()
+
+            self.assertEqual(processed_count, 1)
+            self.assertEqual(parser.attempts, 2)
+            record = repository.get_document(1)
+            self.assertEqual(record.current_status, "PROCESSED")
+            retry_events = [event for event in repository.events if event["event_type"] == "PARSING_RETRY"]
+            self.assertEqual(len(retry_events), 1)
 
 
 if __name__ == "__main__":

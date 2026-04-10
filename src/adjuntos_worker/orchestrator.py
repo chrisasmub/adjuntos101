@@ -146,7 +146,12 @@ class WorkerApp:
                 message="Submitting document to parser provider {0}".format(self.parser.provider_name),
             )
 
-            parse_result = self.parser.parse(claimed_file.claimed_path, classification)
+            parse_result = self._parse_with_retry(
+                claimed_file.claimed_path,
+                classification,
+                document_id=document_id,
+                attachment_hash=fingerprint.sha256,
+            )
             classification = classify_document(
                 claimed_file.claimed_path,
                 text=parse_result.markdown,
@@ -318,3 +323,77 @@ class WorkerApp:
                             extra={"document_id": document_id, "path": str(final_path or candidate)},
                         )
             return False
+
+    def _parse_with_retry(self, path, classification, document_id: int, attachment_hash: str):
+        max_retries = max(0, self.config.parse.max_retries)
+        attempt = 0
+
+        while True:
+            try:
+                return self.parser.parse(path, classification)
+            except Exception as exc:
+                if attempt >= max_retries or not self._is_retryable_parser_error(exc):
+                    raise
+
+                attempt += 1
+                backoff_seconds = max(0, self.config.parse.retry_backoff_seconds) * attempt
+                self.repository.append_event(
+                    document_id,
+                    stage="PARSING",
+                    event_type="PARSING_RETRY",
+                    message="Retry {0}/{1} after transient parser error: {2}: {3}".format(
+                        attempt,
+                        max_retries,
+                        type(exc).__name__,
+                        exc,
+                    ),
+                )
+                self.logger.warning(
+                    "Transient parser error; retrying parse",
+                    extra={
+                        "document_id": document_id,
+                        "attachment_hash": attachment_hash,
+                        "event_type": "PARSING_RETRY",
+                        "status": "RETRY",
+                        "path": str(path),
+                    },
+                )
+                if backoff_seconds:
+                    time.sleep(backoff_seconds)
+
+    def _is_retryable_parser_error(self, exc: Exception) -> bool:
+        retryable_names = {
+            "TimeoutError",
+            "ReadTimeout",
+            "WriteTimeout",
+            "ConnectTimeout",
+            "PoolTimeout",
+            "ConnectError",
+            "ReadError",
+            "RemoteProtocolError",
+            "NetworkError",
+            "TransportError",
+        }
+        if type(exc).__name__ in retryable_names:
+            return True
+        if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+            return True
+
+        message = str(exc).lower()
+        return any(
+            marker in message
+            for marker in (
+                "timeout",
+                "timed out",
+                "temporary failure",
+                "temporarily unavailable",
+                "connection reset",
+                "connection refused",
+                "connection aborted",
+                "429",
+                "502",
+                "503",
+                "504",
+                "rate limit",
+            )
+        )
