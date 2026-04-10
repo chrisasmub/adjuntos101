@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -46,6 +46,55 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(normalized.issuer_name, "Comercial Demo")
         self.assertEqual(normalized.currency, "CLP")
         self.assertEqual(normalized.total_amount, 15000.0)
+        self.assertFalse(validation.requires_review)
+
+    def test_normalize_realistic_markdown_invoice(self):
+        classification = DocumentClassification(
+            document_type="invoice",
+            provider_tier="cost_effective",
+            provider_version="latest",
+            rationale="Matched invoice keyword.",
+        )
+        parse_result = ParseResult(
+            provider="llamaparse",
+            provider_job_id="job-2",
+            provider_tier="cost_effective",
+            provider_version="latest",
+            raw_json={},
+            markdown="\n".join(
+                [
+                    "# Invoice",
+                    "",
+                    "**Invoice number** IN-61952233",
+                    "**Date of issue** April 9, 2026",
+                    "**Date due** April 9, 2026",
+                    "",
+                    "**Cloudflare, Inc.**",
+                    "101 Townsend Street",
+                    "",
+                    "## $0.00 USD due April 9, 2026",
+                    "",
+                    "| Description | Qty | Unit Price | Total |",
+                    "| --- | --- | --- | --- |",
+                    "| Total | $0.00 | | |",
+                    "| **Amount due** | **$0.00 USD** | | |",
+                ]
+            ),
+            started_at=datetime.utcnow(),
+            completed_at=datetime.utcnow(),
+            outcome="COMPLETED",
+        )
+
+        normalized = normalize_document(classification, parse_result)
+        validation = validate_normalized_document(normalized)
+
+        self.assertEqual(normalized.document_type, "invoice")
+        self.assertEqual(normalized.issuer_name, "Cloudflare, Inc.")
+        self.assertEqual(normalized.issue_date, date(2026, 4, 9))
+        self.assertEqual(normalized.due_date, date(2026, 4, 9))
+        self.assertEqual(normalized.currency, "USD")
+        self.assertEqual(normalized.total_amount, 0.0)
+        self.assertEqual(normalized.document_number, "IN-61952233")
         self.assertFalse(validation.requires_review)
 
 

@@ -70,6 +70,19 @@ class ParseAttemptRecord:
 
 
 @dataclass(frozen=True)
+class ExceptionRecord:
+    exception_id: int
+    document_id: int
+    stage: str
+    severity: str
+    reason_code: str
+    reason_detail: str
+    opened_at: datetime
+    closed_at: Optional[datetime]
+    resolution_note: Optional[str]
+
+
+@dataclass(frozen=True)
 class NormalizedDocument:
     document_type: str
     issuer_name: str

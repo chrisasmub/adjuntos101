@@ -10,6 +10,28 @@ from adjuntos_worker.models import (
 
 
 class Repository(Protocol):
+    def begin(self) -> None:
+        ...
+
+    def commit(self) -> None:
+        ...
+
+    def rollback(self) -> None:
+        ...
+
+    def open_exception(
+        self,
+        document_id: int,
+        stage: str,
+        severity: str,
+        reason_code: str,
+        reason_detail: str,
+    ) -> int:
+        ...
+
+    def close_open_exceptions(self, document_id: int, resolution_note: str) -> None:
+        ...
+
     def get_document_id_by_hash(self, attachment_hash: str) -> Optional[int]:
         ...
 

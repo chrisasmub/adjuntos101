@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -20,8 +20,8 @@ class _FakeJob:
     def __init__(self) -> None:
         self.id = "pjb-test-123"
         self.status = "COMPLETED"
-        self.created_at = datetime(2026, 4, 8, 12, 0, 0)
-        self.updated_at = datetime(2026, 4, 8, 12, 0, 5)
+        self.created_at = datetime(2026, 4, 8, 12, 0, 0, tzinfo=timezone.utc)
+        self.updated_at = datetime(2026, 4, 8, 12, 0, 5, tzinfo=timezone.utc)
 
 
 class _FakeResponse:
@@ -108,6 +108,10 @@ class LlamaParseClientTests(unittest.TestCase):
         self.assertEqual(result.outcome, "COMPLETED")
         self.assertEqual(result.markdown, "# Test\n\nParsed document")
         self.assertEqual(result.raw_json["job"]["id"], "pjb-test-123")
+        self.assertEqual(result.started_at.tzinfo, None)
+        self.assertEqual(result.completed_at.tzinfo, None)
+        self.assertEqual(result.started_at, datetime(2026, 4, 8, 12, 0, 0))
+        self.assertEqual(result.completed_at, datetime(2026, 4, 8, 12, 0, 5))
 
 
 if __name__ == "__main__":

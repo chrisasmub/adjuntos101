@@ -24,7 +24,64 @@ class IrisRepository:
             ) from exc
 
         connection = iris.connect(settings.dsn, settings.username, settings.password)
+        connection.setAutoCommit(False)
+        connection.autocommit = False
+        if connection.autocommit:
+            raise RuntimeError("Could not disable autocommit for IRIS connection.")
         return cls(connection)
+
+    def begin(self) -> None:
+        return None
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+    def rollback(self) -> None:
+        self._connection.rollback()
+
+    def open_exception(
+        self,
+        document_id: int,
+        stage: str,
+        severity: str,
+        reason_code: str,
+        reason_detail: str,
+    ) -> int:
+        opened_at = datetime.utcnow()
+        cursor = self._connection.cursor()
+        cursor.execute(
+            """
+            INSERT INTO doc_exception
+                (document_id, stage, severity, reason_code, reason_detail, opened_at, closed_at, resolution_note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (document_id, stage, severity, reason_code, reason_detail, opened_at, None, None),
+        )
+        cursor.execute(
+            """
+            SELECT exception_id
+              FROM doc_exception
+             WHERE document_id = ? AND opened_at = ?
+            """,
+            (document_id, opened_at),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError("IRIS insert completed but exception_id could not be retrieved.")
+        return int(row[0])
+
+    def close_open_exceptions(self, document_id: int, resolution_note: str) -> None:
+        cursor = self._connection.cursor()
+        cursor.execute(
+            """
+            UPDATE doc_exception
+               SET closed_at = ?,
+                   resolution_note = ?
+             WHERE document_id = ?
+               AND closed_at IS NULL
+            """,
+            (datetime.utcnow(), resolution_note, document_id),
+        )
 
     def get_document_id_by_hash(self, attachment_hash: str) -> Optional[int]:
         cursor = self._connection.cursor()
@@ -66,8 +123,6 @@ class IrisRepository:
                 timestamp,
             ),
         )
-        self._connection.commit()
-
         cursor.execute(
             "SELECT document_id FROM doc_document WHERE attachment_hash = ?",
             (fingerprint.sha256,),
@@ -94,8 +149,6 @@ class IrisRepository:
             """,
             (current_status, archive_path, datetime.utcnow(), document_id),
         )
-        self._connection.commit()
-
     def append_event(
         self,
         document_id: int,
@@ -111,8 +164,6 @@ class IrisRepository:
             """,
             (document_id, datetime.utcnow(), stage, event_type, message),
         )
-        self._connection.commit()
-
     def get_document(self, document_id: int) -> DocumentRecord:
         cursor = self._connection.cursor()
         cursor.execute(
@@ -170,7 +221,6 @@ class IrisRepository:
                 None,
             ),
         )
-        self._connection.commit()
         cursor.execute(
             """
             SELECT parse_attempt_id
@@ -266,7 +316,5 @@ class IrisRepository:
                     normalized_json_path,
                 ),
             )
-        self._connection.commit()
-
     def close(self) -> None:
         self._connection.close()

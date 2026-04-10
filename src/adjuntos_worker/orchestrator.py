@@ -1,6 +1,5 @@
 import logging
 import time
-from dataclasses import replace
 from typing import Optional
 
 from adjuntos_worker.classifier import classify_document
@@ -75,6 +74,10 @@ class WorkerApp:
     def _process_candidate(self, candidate) -> bool:
         document_id: Optional[int] = None
         claimed_file = None
+        fingerprint = None
+        transaction_started = False
+        final_path = None
+        current_stage = "INTAKE"
 
         try:
             claimed_file = claim_file(candidate, self.config.paths.processing_dir)
@@ -82,27 +85,31 @@ class WorkerApp:
 
             existing_document_id = self.repository.get_document_id_by_hash(fingerprint.sha256)
             if existing_document_id is not None:
-                duplicate_path = finalize_duplicate(
-                    claimed_file, fingerprint, self.config.paths.duplicates_dir
-                )
+                final_path = finalize_duplicate(claimed_file, fingerprint, self.config.paths.duplicates_dir)
+                self.repository.begin()
+                transaction_started = True
                 self.repository.append_event(
                     existing_document_id,
                     stage="INTAKE",
                     event_type="DUPLICATE_DETECTED",
-                    message="Duplicate file moved to {0}".format(duplicate_path),
+                    message="Duplicate file moved to {0}".format(final_path),
                 )
+                self.repository.commit()
+                transaction_started = False
                 self.logger.info(
                     "Duplicate file detected",
                     extra={
                         "document_id": existing_document_id,
                         "attachment_hash": fingerprint.sha256,
                         "event_type": "DUPLICATE_DETECTED",
-                        "path": str(duplicate_path),
+                        "path": str(final_path),
                         "status": "DUPLICATE",
                     },
                 )
                 return True
 
+            self.repository.begin()
+            transaction_started = True
             document_id = self.repository.create_document_stub(
                 fingerprint=fingerprint,
                 source_path=str(candidate),
@@ -114,6 +121,7 @@ class WorkerApp:
                 event_type="CLAIMED",
                 message="File moved to {0}".format(claimed_file.claimed_path),
             )
+            current_stage = "CLASSIFICATION"
             classification = classify_document(
                 claimed_file.claimed_path,
                 text="",
@@ -130,6 +138,7 @@ class WorkerApp:
                 ),
             )
             self.repository.update_document_status(document_id, current_status="PARSING")
+            current_stage = "PARSING"
             self.repository.append_event(
                 document_id,
                 stage="PARSING",
@@ -143,7 +152,9 @@ class WorkerApp:
                 text=parse_result.markdown,
                 parse_settings=self.config.parse,
             )
+            current_stage = "NORMALIZATION"
             normalized_document = normalize_document(classification, parse_result)
+            current_stage = "VALIDATION"
             validation = validate_normalized_document(normalized_document)
             normalized_document = apply_validation_result(normalized_document, validation)
 
@@ -192,9 +203,7 @@ class WorkerApp:
             )
 
             if normalized_document.review_required:
-                review_path = finalize_review(
-                    claimed_file, fingerprint, self.config.paths.review_dir
-                )
+                final_path = finalize_review(claimed_file, fingerprint, self.config.paths.review_dir)
                 self.repository.update_document_status(
                     document_id,
                     current_status="REVIEW",
@@ -204,7 +213,7 @@ class WorkerApp:
                     document_id,
                     stage="VALIDATION",
                     event_type="REVIEW_REQUIRED",
-                    message="Document sent to Review at {0}".format(review_path),
+                    message="Document sent to Review at {0}".format(final_path),
                 )
                 self.logger.info(
                     "File sent to review",
@@ -212,14 +221,12 @@ class WorkerApp:
                         "document_id": document_id,
                         "attachment_hash": fingerprint.sha256,
                         "event_type": "REVIEW_REQUIRED",
-                        "path": str(review_path),
+                        "path": str(final_path),
                         "status": "REVIEW",
                     },
                 )
             else:
-                processed_path = finalize_success(
-                    claimed_file, fingerprint, self.config.paths.processed_dir
-                )
+                final_path = finalize_success(claimed_file, fingerprint, self.config.paths.processed_dir)
                 self.repository.update_document_status(
                     document_id,
                     current_status="PROCESSED",
@@ -229,7 +236,7 @@ class WorkerApp:
                     document_id,
                     stage="VALIDATION",
                     event_type="PROCESSED",
-                    message="Document stored at {0}".format(processed_path),
+                    message="Document stored at {0}".format(final_path),
                 )
                 self.logger.info(
                     "File processed successfully",
@@ -237,32 +244,77 @@ class WorkerApp:
                         "document_id": document_id,
                         "attachment_hash": fingerprint.sha256,
                         "event_type": "PROCESSED",
-                        "path": str(processed_path),
+                        "path": str(final_path),
                         "status": "PROCESSED",
                     },
                 )
+            self.repository.close_open_exceptions(
+                document_id,
+                resolution_note="Document reached final state {0}".format(
+                    "REVIEW" if normalized_document.review_required else "PROCESSED"
+                ),
+            )
+            self.repository.commit()
+            transaction_started = False
             return True
 
-        except Exception:
+        except Exception as exc:
+            if transaction_started:
+                try:
+                    self.repository.rollback()
+                except Exception:
+                    self.logger.exception(
+                        "Could not rollback repository transaction",
+                        extra={"document_id": document_id, "path": str(candidate)},
+                    )
             self.logger.exception(
                 "Unhandled error while processing file",
                 extra={"path": str(candidate), "status": "ERROR"},
             )
 
             if claimed_file is not None:
-                error_path = finalize_error(claimed_file, self.config.paths.error_dir)
-                if document_id is not None:
+                if claimed_file.claimed_path.exists():
+                    final_path = finalize_error(claimed_file, self.config.paths.error_dir)
+                if fingerprint is not None:
                     try:
-                        self.repository.update_document_status(document_id, current_status="ERROR")
+                        self.repository.begin()
+                        transaction_started = True
+                        document_id = self.repository.create_document_stub(
+                            fingerprint=fingerprint,
+                            source_path=str(candidate),
+                            current_status="ERROR",
+                        )
+                        reason_code = "{0}_FAILED".format(current_stage)
+                        reason_detail = "{0}: {1}".format(type(exc).__name__, exc)
+                        self.repository.open_exception(
+                            document_id,
+                            stage=current_stage,
+                            severity="ERROR",
+                            reason_code=reason_code,
+                            reason_detail=reason_detail,
+                        )
                         self.repository.append_event(
                             document_id,
-                            stage="INTAKE",
+                            stage=current_stage,
                             event_type="ERROR",
-                            message="File moved to {0} after failure".format(error_path),
+                            message="File moved to {0} after failure ({1}).".format(
+                                final_path or candidate,
+                                reason_code,
+                            ),
                         )
+                        self.repository.commit()
+                        transaction_started = False
                     except Exception:
+                        if transaction_started:
+                            try:
+                                self.repository.rollback()
+                            except Exception:
+                                self.logger.exception(
+                                    "Could not rollback error registration transaction",
+                                    extra={"document_id": document_id, "path": str(candidate)},
+                                )
                         self.logger.exception(
                             "Could not record error status in repository",
-                            extra={"document_id": document_id, "path": str(error_path)},
+                            extra={"document_id": document_id, "path": str(final_path or candidate)},
                         )
             return False

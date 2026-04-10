@@ -18,6 +18,13 @@ from adjuntos_worker.parse_clients.mock import MockParseClient
 from adjuntos_worker.repositories.noop import NoopRepository
 
 
+class ExplodingParseClient:
+    provider_name = "exploding"
+
+    def parse(self, path, classification):
+        raise RuntimeError("Synthetic parser failure")
+
+
 class WorkerAppTests(unittest.TestCase):
     def _build_config(self, base_dir: Path) -> AppConfig:
         paths = PathSettings(
@@ -157,6 +164,50 @@ class WorkerAppTests(unittest.TestCase):
 
             review_files = list(config.paths.review_dir.rglob("statement.pdf"))
             self.assertEqual(len(review_files), 1)
+
+    def test_run_once_rolls_back_partial_repository_writes_on_failure(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base_dir = Path(tmp_dir)
+            config = self._build_config(base_dir)
+            repository = NoopRepository()
+            app = WorkerApp(config, repository, ExplodingParseClient())
+
+            config.paths.in_dir.mkdir(parents=True, exist_ok=True)
+
+            file_path = config.paths.in_dir / "broken.pdf"
+            file_path.write_text(
+                "\n".join(
+                    [
+                        "Factura Electronica",
+                        "Emisor: Demo",
+                        "Fecha Emision: 2026-04-03",
+                        "Moneda: CLP",
+                        "Monto Total: 9999",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            processed_count = app.run_once()
+
+            self.assertEqual(processed_count, 0)
+            self.assertEqual(len(repository.documents), 1)
+            self.assertEqual(len(repository.parse_attempts), 0)
+            self.assertEqual(len(repository.normalized_documents), 0)
+            self.assertEqual(len(repository.events), 1)
+            self.assertEqual(len(repository.exceptions), 1)
+
+            record = repository.get_document(1)
+            self.assertEqual(record.current_status, "ERROR")
+            self.assertEqual(repository.events[0]["event_type"], "ERROR")
+            exception = repository.exceptions[1]
+            self.assertEqual(exception.stage, "PARSING")
+            self.assertEqual(exception.severity, "ERROR")
+            self.assertEqual(exception.reason_code, "PARSING_FAILED")
+            self.assertIn("Synthetic parser failure", exception.reason_detail)
+
+            error_files = list(config.paths.error_dir.rglob("broken.pdf"))
+            self.assertEqual(len(error_files), 1)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,11 @@
+import copy
 from dataclasses import replace
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from adjuntos_worker.models import (
     DocumentRecord,
+    ExceptionRecord,
     FileFingerprint,
     NormalizedDocument,
     ParseAttemptRecord,
@@ -14,11 +17,84 @@ class NoopRepository:
     def __init__(self) -> None:
         self._next_id = 1
         self._next_parse_attempt_id = 1
+        self._transaction_snapshot = None
         self.documents: Dict[int, DocumentRecord] = {}
         self.hash_index: Dict[str, int] = {}
         self.events: List[dict] = []
         self.parse_attempts: Dict[int, ParseAttemptRecord] = {}
         self.normalized_documents: Dict[int, dict] = {}
+        self.exceptions: Dict[int, ExceptionRecord] = {}
+        self._next_exception_id = 1
+
+    def begin(self) -> None:
+        if self._transaction_snapshot is not None:
+            raise RuntimeError("Transaction already active in NoopRepository.")
+        self._transaction_snapshot = {
+            "next_id": self._next_id,
+            "next_parse_attempt_id": self._next_parse_attempt_id,
+            "documents": copy.deepcopy(self.documents),
+            "hash_index": copy.deepcopy(self.hash_index),
+            "events": copy.deepcopy(self.events),
+            "parse_attempts": copy.deepcopy(self.parse_attempts),
+            "normalized_documents": copy.deepcopy(self.normalized_documents),
+            "exceptions": copy.deepcopy(self.exceptions),
+            "next_exception_id": self._next_exception_id,
+        }
+
+    def commit(self) -> None:
+        if self._transaction_snapshot is None:
+            raise RuntimeError("No active transaction in NoopRepository.")
+        self._transaction_snapshot = None
+
+    def rollback(self) -> None:
+        if self._transaction_snapshot is None:
+            raise RuntimeError("No active transaction in NoopRepository.")
+        snapshot = self._transaction_snapshot
+        self._next_id = snapshot["next_id"]
+        self._next_parse_attempt_id = snapshot["next_parse_attempt_id"]
+        self.documents = snapshot["documents"]
+        self.hash_index = snapshot["hash_index"]
+        self.events = snapshot["events"]
+        self.parse_attempts = snapshot["parse_attempts"]
+        self.normalized_documents = snapshot["normalized_documents"]
+        self.exceptions = snapshot["exceptions"]
+        self._next_exception_id = snapshot["next_exception_id"]
+        self._transaction_snapshot = None
+
+    def open_exception(
+        self,
+        document_id: int,
+        stage: str,
+        severity: str,
+        reason_code: str,
+        reason_detail: str,
+    ) -> int:
+        opened_at = datetime.utcnow()
+        exception_id = self._next_exception_id
+        self._next_exception_id += 1
+        self.exceptions[exception_id] = ExceptionRecord(
+            exception_id=exception_id,
+            document_id=document_id,
+            stage=stage,
+            severity=severity,
+            reason_code=reason_code,
+            reason_detail=reason_detail,
+            opened_at=opened_at,
+            closed_at=None,
+            resolution_note=None,
+        )
+        return exception_id
+
+    def close_open_exceptions(self, document_id: int, resolution_note: str) -> None:
+        closed_at = datetime.utcnow()
+        for exception_id, record in list(self.exceptions.items()):
+            if record.document_id != document_id or record.closed_at is not None:
+                continue
+            self.exceptions[exception_id] = replace(
+                record,
+                closed_at=closed_at,
+                resolution_note=resolution_note,
+            )
 
     def get_document_id_by_hash(self, attachment_hash: str) -> Optional[int]:
         return self.hash_index.get(attachment_hash)

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 from adjuntos_worker.config import ParseSettings
@@ -40,8 +41,8 @@ class LlamaParseClient:
             provider_version=classification.provider_version,
             raw_json=self._to_dict(response),
             markdown=self._extract_markdown(response),
-            started_at=response.job.created_at or response.job.updated_at,
-            completed_at=response.job.updated_at or response.job.created_at,
+            started_at=self._normalize_datetime(response.job.created_at or response.job.updated_at),
+            completed_at=self._normalize_datetime(response.job.updated_at or response.job.created_at),
             outcome=str(response.job.status).upper(),
         )
 
@@ -92,3 +93,8 @@ class LlamaParseClient:
         if normalized.endswith("/api/v2"):
             return normalized[: -len("/api/v2")]
         return normalized
+
+    def _normalize_datetime(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
