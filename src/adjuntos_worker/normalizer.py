@@ -1,3 +1,4 @@
+import calendar
 import re
 from datetime import date, datetime
 from typing import Optional
@@ -15,30 +16,60 @@ def normalize_document(
     issuer_name = _extract_labeled_text(text, ["issuer", "emisor", "empresa", "banco"])
     if not issuer_name and inferred_type == "invoice":
         issuer_name = _extract_invoice_issuer_name(text)
+    if not issuer_name and inferred_type == "receipt":
+        issuer_name = _extract_receipt_issuer_name(text)
+    if not issuer_name and inferred_type == "bank_statement":
+        issuer_name = _extract_bank_statement_issuer_name(text)
     issuer_tax_id = _extract_labeled_text(text, ["rut", "tax id", "issuer tax id"])
     issue_date = _extract_date(
-        text, ["issue date", "date of issue", "fecha emision", "fecha de emision", "fecha"]
+        text,
+        [
+            "issue date",
+            "invoice date",
+            "date of issue",
+            "fecha emision",
+            "fecha de emision",
+            "fecha",
+        ],
     )
-    due_date = _extract_date(text, ["due date", "date due", "fecha vencimiento", "vencimiento"])
-    period_from = _extract_date(text, ["period from", "desde", "periodo desde"])
-    period_to = _extract_date(text, ["period to", "hasta", "periodo hasta"])
+    due_date = _extract_date(
+        text,
+        ["due date", "date due", "next billing date", "fecha vencimiento", "vencimiento"],
+    )
+    if issue_date is None and inferred_type == "receipt":
+        issue_date = _extract_receipt_issue_date(text)
+    period_from = _extract_date(text, ["period from", "billing period", "desde", "periodo desde"])
+    period_to = _extract_date(text, ["period to", "billing period", "hasta", "periodo hasta"])
 
     if (period_from is None or period_to is None) and "periodo" in text.lower():
         date_range = _extract_date_range(text)
         if date_range is not None:
             period_from = period_from or date_range[0]
             period_to = period_to or date_range[1]
+    if period_from is None or period_to is None:
+        billing_period = _extract_billing_period(text)
+        if billing_period is not None:
+            period_from = period_from or billing_period[0]
+            period_to = period_to or billing_period[1]
+    if period_from is None or period_to is None:
+        month_period = _extract_month_period(text)
+        if month_period is not None:
+            period_from = period_from or month_period[0]
+            period_to = period_to or month_period[1]
 
     currency = _extract_currency(text)
     total_amount = _extract_amount(
         text,
-        ["amount due", "total amount", "monto total", "importe total", "total"],
+        ["invoice amount", "amount due", "total amount", "monto total", "importe total", "total"],
     )
-    balance_amount = _extract_amount(text, ["balance amount", "saldo", "saldo total", "balance"])
+    if inferred_type == "receipt":
+        total_amount = _extract_receipt_total_amount(text) or total_amount
+    balance_amount = _extract_amount(
+        text,
+        ["ending value", "total market value", "balance amount", "saldo", "saldo total", "balance"],
+    )
     account_ref_last4 = _extract_account_last4(text)
-    document_number = _extract_labeled_text(
-        text, ["document number", "numero documento", "folio", "invoice number", "nro documento"]
-    )
+    document_number = _extract_document_number(text)
 
     confidence = _calculate_confidence(
         inferred_type,
@@ -126,6 +157,57 @@ def _extract_date_range(text: str):
     return None
 
 
+def _extract_billing_period(text: str):
+    match = re.search(
+        r"billing period\s*(?:[:#\-]|\|)?\s*(?:\*\*)?([A-Za-z]{3,9}\s+[0-9]{1,2})\s+(?:to|a|hasta|-)\s+([A-Za-z]{3,9}\s+[0-9]{1,2},\s*[0-9]{4})(?:\*\*)?",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    end_date = _parse_date(_strip_markdown(match.group(2)))
+    if end_date is None:
+        return None
+
+    start_raw = "{0} {1}".format(_strip_markdown(match.group(1)), end_date.year)
+    start_date = _parse_date(start_raw)
+    if start_date is None:
+        return None
+
+    return start_date, end_date
+
+
+def _extract_month_period(text: str):
+    month_names = (
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    )
+    match = re.search(
+        r"(?:period\s*(?:[:#\-]|\|)?\s*)?(" + "|".join(month_names) + r")\s*[-/]\s*([0-9]{4})",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    month_name = match.group(1).lower()
+    year = int(match.group(2))
+    month = month_names.index(month_name) + 1
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, 1), date(year, month, last_day)
+
+
 def _extract_currency(text: str) -> str:
     for currency in ("CLP", "USD", "UF", "EUR"):
         if re.search(r"\b{0}\b".format(currency), text, re.IGNORECASE):
@@ -144,7 +226,7 @@ def _extract_amount(text: str, labels) -> Optional[float]:
                 if amount is not None:
                     return amount
         loose_match = re.search(
-            r"{0}(?:\*\*)?(?:\s|[:#\-\|]|</?[a-z]+>)*?(?:\*\*)?(?:CLP|USD|UF|EUR|\$)\s*([0-9][0-9\.,]*)".format(
+            r"(?<!\w){0}(?!\w)(?:\*\*)?(?:\s|[:#\-\|]|</?[a-z]+>)*?(?:\*\*)?(?:CLP|USD|UF|EUR|\$)\s*([0-9][0-9\.,]*)".format(
                 re.escape(label)
             ),
             text,
@@ -158,10 +240,35 @@ def _extract_amount(text: str, labels) -> Optional[float]:
 
 
 def _extract_invoice_issuer_name(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        if line.lower() != "# invoice":
+            continue
+        for candidate in lines[index + 1 :]:
+            if not candidate or candidate.startswith("<!--"):
+                continue
+            lowered = _strip_markdown(candidate).strip().lower()
+            if (
+                lowered.startswith("invoice ")
+                or lowered.startswith("date ")
+                or lowered.startswith("amount ")
+                or lowered.startswith("billing period")
+                or lowered.startswith("next billing date")
+                or lowered.startswith("paid")
+            ):
+                break
+            if lowered in {"paid", "billed to", "subscription", "payments", "notes"}:
+                continue
+            if re.match(r"^[0-9]{4,}", lowered):
+                continue
+            return _strip_markdown(candidate).strip()
+
     ignore_values = {
         "invoice",
         "bill to",
         "invoice number",
+        "invoice #",
+        "invoice date",
         "date of issue",
         "date due",
         "amount due",
@@ -179,16 +286,104 @@ def _extract_invoice_issuer_name(text: str) -> str:
     return ""
 
 
+def _extract_bank_statement_issuer_name(text: str) -> str:
+    issuers = []
+    for match in re.finditer(r"!\[([^\]]+?)\s+logo\]", text, re.IGNORECASE):
+        issuer = _strip_markdown(match.group(1)).strip()
+        if issuer and issuer not in issuers:
+            issuers.append(issuer)
+    if issuers:
+        return " / ".join(issuers)
+
+    lines = [line.strip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        if "monthly statement" not in line.lower():
+            continue
+        for candidate in reversed(lines[:index]):
+            if not candidate or candidate.startswith("![") or candidate.startswith("----"):
+                continue
+            if re.search(r"[0-9]{3,}", candidate):
+                continue
+            if "," in candidate:
+                continue
+            return _strip_markdown(candidate)
+    return ""
+
+
+def _extract_receipt_issuer_name(text: str) -> str:
+    company_pattern = re.compile(r"^[A-Z0-9][A-Z0-9 .,&\-]{4,}$")
+    preferred_suffixes = ("S.A.", "S.A", "SPA", "LTDA", "LTDA.", "LIMITADA")
+
+    candidates = []
+    for line in text.splitlines():
+        candidate = _strip_markdown(line)
+        if not candidate:
+            continue
+        lowered = candidate.lower()
+        if "boleta electronica" in lowered or "sii " in lowered or lowered.startswith("rut "):
+            continue
+        if candidate.startswith("-"):
+            continue
+        if company_pattern.match(candidate) and any(ch.isalpha() for ch in candidate):
+            candidates.append(candidate)
+
+    for candidate in candidates:
+        upper = candidate.upper()
+        if any(upper.endswith(suffix) for suffix in preferred_suffixes):
+            return candidate
+    for candidate in candidates:
+        if "." in candidate and " " not in candidate:
+            continue
+        return candidate
+    return ""
+
+
+def _extract_receipt_issue_date(text: str) -> Optional[date]:
+    match = re.search(r"\b([0-9]{2}/[0-9]{2}/[0-9]{2})\b(?:\s+[0-9]{2}:[0-9]{2})?", text)
+    if not match:
+        return None
+    return _parse_date(match.group(1))
+
+
+def _extract_receipt_total_amount(text: str) -> Optional[float]:
+    match = re.search(r"^TOTAL\s+\$\s*([0-9\.\,]+)\s*$", text, re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return None
+    return _parse_amount(match.group(1))
+
+
 def _extract_account_last4(text: str) -> str:
-    match = re.search(r"(?:account|cuenta|card|tarjeta)[^0-9]*([0-9]{4})", text, re.IGNORECASE)
+    match = re.search(r"(?:account|cuenta|card|tarjeta)[^0-9]*([0-9]{4,})", text, re.IGNORECASE)
     if match:
-        return match.group(1)
+        return match.group(1)[-4:]
+    return ""
+
+
+def _extract_document_number(text: str) -> str:
+    document_number = _extract_labeled_text(
+        text,
+        [
+            "document number",
+            "numero documento",
+            "folio",
+            "invoice number",
+            "nro documento",
+        ],
+    )
+    if document_number:
+        return document_number
+
+    match = re.search(r"invoice\s*#\s*(?:\*\*)?([A-Za-z0-9\-]+)(?:\*\*)?", text, re.IGNORECASE)
+    if match:
+        return _strip_markdown(match.group(1))
     return ""
 
 
 def _parse_amount(raw: str) -> Optional[float]:
     cleaned = raw.strip().replace(" ", "")
-    if cleaned.count(",") == 1 and cleaned.count(".") > 1:
+    if re.match(r"^[0-9]{1,3}(?:\.[0-9]{3})+$", cleaned):
+        cleaned = cleaned.replace(".", "")
+    elif cleaned.count(",") == 1 and cleaned.count(".") > 1:
         cleaned = cleaned.replace(".", "").replace(",", ".")
     elif cleaned.count(",") == 1 and cleaned.count(".") == 0:
         cleaned = cleaned.replace(",", ".")
@@ -202,7 +397,17 @@ def _parse_amount(raw: str) -> Optional[float]:
 
 def _parse_date(raw: str) -> Optional[date]:
     cleaned = raw.strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%B %d, %Y", "%b %d, %Y"):
+    for fmt in (
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+        "%d/%m/%y",
+        "%d-%m-%Y",
+        "%d-%m-%y",
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%B %d %Y",
+        "%b %d %Y",
+    ):
         try:
             return datetime.strptime(cleaned, fmt).date()
         except ValueError:
@@ -220,14 +425,14 @@ def _calculate_confidence(document_type: str, **fields) -> float:
 
 
 def _build_label_patterns(label: str, value_pattern: str = r"([^\n]+)") -> list[re.Pattern]:
-    escaped = re.escape(label)
+    escaped = r"(?<!\w){0}(?!\w)".format(re.escape(label))
     return [
         re.compile(
-            r"\*\*{0}\*\*\s*(?:[:#\-]|\|)?\s*{1}".format(escaped, value_pattern),
+            r"\*\*{0}\*\*\s*(?:[:#\-]|\|)?\s*(?:\*\*)?{1}(?:\*\*)?".format(escaped, value_pattern),
             re.IGNORECASE,
         ),
         re.compile(
-            r"{0}\s*(?:[:#\-]|\|)\s*{1}".format(escaped, value_pattern),
+            r"{0}\s*(?:[:#\-]|\|)?\s*(?:\*\*)?{1}(?:\*\*)?".format(escaped, value_pattern),
             re.IGNORECASE,
         ),
     ]

@@ -37,6 +37,7 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Plan de Sprint 4 sobre robustez operacional](docs/11-plan-sprint-4-robustez-operacional.md)
 - [Cierre Sprint 4 y plan de Sprint 5](docs/12-cierre-sprint-4-y-plan-sprint-5-web-console.md)
 - [Entorno IRIS canónico](docs/13-entorno-iris-canonico.md)
+- [Avance y reanudación 2026-04-13](docs/14-avance-y-reanudacion-2026-04-13.md)
 - [Query pack operativo sobre IRIS](sql/010_operational_queries.sql)
 
 ## Entorno IRIS canónico
