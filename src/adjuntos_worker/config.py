@@ -143,7 +143,7 @@ def load_config(env_file: str = ".env") -> AppConfig:
         mode=_get(env_values, "DATABASE_MODE", "iris").lower(),
         host=_get(env_values, "IRIS_HOST", "localhost"),
         port=_get_int(env_values, "IRIS_PORT", 1972),
-        namespace=_get(env_values, "IRIS_NAMESPACE", "DOCSPOC"),
+        namespace=_get(env_values, "IRIS_NAMESPACE", "USER"),
         username=_get(env_values, "IRIS_USERNAME", "USER"),
         password=_get(env_values, "IRIS_PASSWORD", ""),
     )

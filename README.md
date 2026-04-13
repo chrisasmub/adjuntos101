@@ -36,7 +36,27 @@ No se utilizará Embedded Python dentro de IRIS en esta primera etapa. La lógic
 - [Bootstrap y smoke test sobre iris105](docs/10-iris105-bootstrap-y-smoke-test.md)
 - [Plan de Sprint 4 sobre robustez operacional](docs/11-plan-sprint-4-robustez-operacional.md)
 - [Cierre Sprint 4 y plan de Sprint 5](docs/12-cierre-sprint-4-y-plan-sprint-5-web-console.md)
+- [Entorno IRIS canónico](docs/13-entorno-iris-canonico.md)
 - [Query pack operativo sobre IRIS](sql/010_operational_queries.sql)
+
+## Entorno IRIS canónico
+
+La referencia operativa oficial de este proyecto es:
+
+- contenedor Docker: `iris105`
+- host: `localhost`
+- puerto superserver: `1972`
+- namespace: `USER`
+- schema SQL: `SQLUser`
+
+DSN esperado:
+
+```text
+localhost:1972/USER
+```
+
+Nota importante:
+en la máquina puede existir otro contenedor llamado `iris` publicado en `11972`, pero ese no es el target por defecto de `adjuntos101`.
 
 ## Resultado esperado al cierre
 
@@ -87,7 +107,8 @@ adjuntos-web --env-file .env --host 127.0.0.1 --port 8080
 La app expone:
 
 - `/` listado filtrable de documentos;
-- `/documents/<id>` detalle con normalizado, parse attempts, eventos y excepciones.
+- `/documents/<id>` detalle con normalizado, parse attempts, eventos, excepciones y artefactos;
+- `/documents/<id>/artifacts/<name>` para abrir artefactos del bundle archivado, por ejemplo `original`, `parse_raw`, `parse_markdown` o `normalized_json`.
 
 ## Sprint 2 implementado
 

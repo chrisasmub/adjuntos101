@@ -363,7 +363,7 @@ Patron esperado:
 ```python
 import iris
 
-conn = iris.connect("localhost:1972/DOCSPOC", "USER", "password")
+conn = iris.connect("localhost:1972/USER", "USER", "password")
 cur = conn.cursor()
 ```
 
@@ -393,12 +393,18 @@ LLAMAPARSE_TIMEOUT_SECONDS=300
 
 IRIS_HOST=localhost
 IRIS_PORT=1972
-IRIS_NAMESPACE=DOCSPOC
+IRIS_NAMESPACE=USER
 IRIS_USERNAME=USER
 IRIS_PASSWORD=
 
 LOG_LEVEL=INFO
 ```
+
+Nota operativa actual:
+
+- contenedor de referencia: `iris105`
+- namespace usado por la POC: `USER`
+- schema SQL de las tablas: `SQLUser`
 
 ## 14. Politica de errores y reintentos
 

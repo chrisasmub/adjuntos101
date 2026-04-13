@@ -8,12 +8,37 @@ Dejar reproducible la preparacion minima de `iris105` para esta POC:
 - conceder permisos DML al usuario de aplicacion;
 - ejecutar una corrida de humo del worker contra IRIS real.
 
+Referencia canónica del entorno:
+
+- contenedor correcto: `iris105`
+- host: `localhost`
+- superserver: `1972`
+- namespace: `USER`
+- schema SQL: `SQLUser`
+
+Documento de referencia:
+
+- [Entorno IRIS canónico](docs/13-entorno-iris-canonico.md)
+
 ## Supuestos actuales
 
 - contenedor: `iris105`;
 - instancia IRIS: `IRIS`;
 - namespace de trabajo: `USER`;
 - usuario de aplicacion configurado en `.env`: `admin`.
+
+## Aclaración sobre otros contenedores IRIS
+
+En esta máquina también existe un contenedor llamado `iris` expuesto por `11972:1972`.
+
+Ese contenedor no es la referencia por defecto de `adjuntos101`.
+
+Para este proyecto se debe asumir siempre:
+
+- `iris105`
+- `localhost:1972`
+- namespace `USER`
+- schema `SQLUser`
 
 ## 1. Bootstrap del esquema y permisos
 
@@ -31,7 +56,8 @@ Qué hace:
 
 - toma el DDL desde [sql/001_init.sql](/Users/christian/vscode/adjuntos101/sql/001_init.sql);
 - lo ejecuta dentro del contenedor usando `iris sql`;
-- concede `SELECT`, `INSERT`, `UPDATE` y `DELETE` al usuario configurado en `IRIS_USERNAME`.
+- concede `SELECT`, `INSERT`, `UPDATE` y `DELETE` al usuario configurado en `IRIS_USERNAME`;
+- deja creadas las tablas de la POC en el namespace `USER`, schema `SQLUser`.
 
 ## 2. Smoke test del worker contra IRIS
 

@@ -1,7 +1,9 @@
 import argparse
 import html
 import json
+import mimetypes
 from datetime import date, datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import parse_qs
 from wsgiref.simple_server import make_server
@@ -183,6 +185,7 @@ class IrisReadModel:
                 "exceptions": self._fetch_exceptions(cursor, document_id),
                 "normalized_json": self._load_json_file(None if row[23] is None else str(row[23])),
             }
+            detail["artifacts"] = self._build_artifacts(detail)
             return detail
         finally:
             cursor.close()
@@ -284,6 +287,28 @@ class IrisReadModel:
         except (OSError, json.JSONDecodeError):
             return None
 
+    def _build_artifacts(self, detail: dict) -> Dict[str, Optional[str]]:
+        latest_attempt = detail["parse_attempts"][0] if detail["parse_attempts"] else {}
+        archive_path = detail.get("archive_path")
+        original_path = self._find_original_artifact(archive_path)
+        return {
+            "original": original_path,
+            "parse_raw": latest_attempt.get("raw_json_path"),
+            "parse_markdown": latest_attempt.get("raw_markdown_path"),
+            "normalized_json": detail.get("normalized_json_path"),
+        }
+
+    def _find_original_artifact(self, archive_path: Optional[str]) -> Optional[str]:
+        if not archive_path:
+            return None
+        bundle_dir = Path(archive_path)
+        if not bundle_dir.exists() or not bundle_dir.is_dir():
+            return None
+        matches = sorted(bundle_dir.glob("original.*"))
+        if not matches:
+            return None
+        return str(matches[0])
+
 
 def _fmt(value) -> str:
     if value is None:
@@ -299,6 +324,13 @@ def _fmt(value) -> str:
 
 def _esc(value) -> str:
     return html.escape(_fmt(value))
+
+
+def _tail(value, max_chars: int = 50) -> str:
+    text = _fmt(value)
+    if len(text) <= max_chars:
+        return text
+    return "..." + text[-max_chars:]
 
 
 def _status_class(status: str) -> str:
@@ -437,6 +469,15 @@ def _layout(title: str, body: str) -> bytes:
       padding: 14px;
     }}
     .meta-item strong {{ display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }}
+    .path-preview {{
+      display: block;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-family: Monaco, "Courier New", monospace;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }}
     pre {{
       background: #201b18;
       color: #f8efe4;
@@ -463,6 +504,29 @@ def _layout(title: str, body: str) -> bytes:
 </html>
 """.format(title=html.escape(title), body=body)
     return page.encode("utf-8")
+
+
+def _artifact_href(document_id: int, artifact_name: str) -> str:
+    return "/documents/{0}/artifacts/{1}".format(document_id, artifact_name)
+
+
+def _read_artifact_bytes(path: str) -> bytes:
+    return Path(path).read_bytes()
+
+
+def _artifact_content_type(path: str) -> str:
+    guessed, _ = mimetypes.guess_type(path)
+    if guessed:
+        if guessed.startswith("text/"):
+            return guessed + "; charset=utf-8"
+        return guessed
+
+    suffix = Path(path).suffix.lower()
+    if suffix == ".md":
+        return "text/markdown; charset=utf-8"
+    if suffix == ".json":
+        return "application/json; charset=utf-8"
+    return "application/octet-stream"
 
 
 def _render_dashboard(read_model: IrisReadModel, params: Dict[str, List[str]]) -> bytes:
@@ -590,9 +654,14 @@ def _render_document_detail(read_model: IrisReadModel, document_id: int) -> byte
         """
         <div class="meta-item">
           <strong>{label}</strong>
-          <div>{value}</div>
+          <div{title_attr}{value_class}>{value}</div>
         </div>
-        """.format(label=_esc(label), value=_esc(value))
+        """.format(
+            label=_esc(label),
+            title_attr=' title="{0}"'.format(_esc(value)) if label == "Archive path" and value not in (None, "-") else "",
+            value_class=' class="path-preview"' if label == "Archive path" else "",
+            value=_esc(_tail(value, 50) if label == "Archive path" else value),
+        )
         for label, value in (
             ("Archivo", detail["original_filename"]),
             ("Estado", detail["current_status"]),
@@ -606,6 +675,33 @@ def _render_document_detail(read_model: IrisReadModel, document_id: int) -> byte
             ("Archive path", detail["archive_path"]),
         )
     )
+
+    artifact_items = "".join(
+        """
+        <div class="meta-item">
+          <strong>{label}</strong>
+          <div><a href="{href}" target="_blank" rel="noopener noreferrer">Abrir artefacto</a></div>
+          <div class="path-preview" title="{full_path}">{path}</div>
+        </div>
+        """.format(
+            label=_esc(label),
+            href=html.escape(_artifact_href(detail["document_id"], artifact_name)),
+            full_path=_esc(path),
+            path=_esc(_tail(path, 50)),
+        )
+        for artifact_name, label, path in (
+            ("original", "Original archivado", detail["artifacts"].get("original")),
+            ("parse_raw", "Parse raw JSON", detail["artifacts"].get("parse_raw")),
+            ("parse_markdown", "Parse markdown", detail["artifacts"].get("parse_markdown")),
+            ("normalized_json", "Normalized JSON", detail["artifacts"].get("normalized_json")),
+        )
+        if path
+    ) or """
+        <div class="meta-item">
+          <strong>Artefactos</strong>
+          <div>No hay artefactos disponibles para este documento.</div>
+        </div>
+    """
 
     parse_rows = "".join(
         """
@@ -687,6 +783,11 @@ def _render_document_detail(read_model: IrisReadModel, document_id: int) -> byte
       <h2 class="section-title">Resumen</h2>
       <div class="meta">{meta_items}</div>
     </section>
+    <div class="spacer"></div>
+    <section class="card">
+      <h2 class="section-title">Artefactos</h2>
+      <div class="meta">{artifact_items}</div>
+    </section>
     <section class="card">
       <h2 class="section-title">Intentos de Parse</h2>
       <table>
@@ -748,12 +849,43 @@ def _render_document_detail(read_model: IrisReadModel, document_id: int) -> byte
         status_class=_status_class(detail["current_status"]),
         status=_esc(detail["current_status"]),
         meta_items=meta_items,
+        artifact_items=artifact_items,
         parse_rows=parse_rows,
         event_rows=event_rows,
         exception_rows=exception_rows,
         normalized_json=html.escape(normalized_json),
     )
     return _layout("Documento #{0}".format(detail["document_id"]), body)
+
+
+def _serve_document_artifact(read_model: IrisReadModel, document_id: int, artifact_name: str):
+    detail = read_model.get_document_detail(document_id)
+    if detail is None:
+        return "404 Not Found", [("Content-Type", "text/html; charset=utf-8")], _layout(
+            "Documento no encontrado",
+            '<section class="hero"><h1>Documento no encontrado</h1><p><a href="/">Volver al listado</a></p></section>',
+        )
+
+    artifacts = detail.get("artifacts", {})
+    path = artifacts.get(artifact_name)
+    if not path or not Path(path).exists():
+        return "404 Not Found", [("Content-Type", "text/html; charset=utf-8")], _layout(
+            "Artefacto no encontrado",
+            """
+            <section class="hero">
+              <h1>Artefacto no encontrado</h1>
+              <p><a href="/documents/{document_id}">Volver al documento</a></p>
+            </section>
+            """.format(document_id=document_id),
+        )
+
+    body = _read_artifact_bytes(path)
+    headers = [
+        ("Content-Type", _artifact_content_type(path)),
+        ("Content-Length", str(len(body))),
+        ("Content-Disposition", 'inline; filename="{0}"'.format(html.escape(Path(path).name))),
+    ]
+    return "200 OK", headers, body
 
 
 def _parse_limit(value: str) -> int:
@@ -783,10 +915,18 @@ def build_wsgi_app(config: AppConfig):
                 return [payload]
 
             if path.startswith("/documents/"):
-                tail = path.split("/", 2)[2]
-                if tail.isdigit():
-                    payload = _render_document_detail(read_model, int(tail))
+                parts = [part for part in path.split("/") if part]
+                if len(parts) == 2 and parts[1].isdigit():
+                    payload = _render_document_detail(read_model, int(parts[1]))
                     start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
+                    return [payload]
+                if len(parts) == 4 and parts[1].isdigit() and parts[2] == "artifacts":
+                    status, headers, payload = _serve_document_artifact(
+                        read_model,
+                        int(parts[1]),
+                        parts[3],
+                    )
+                    start_response(status, headers)
                     return [payload]
 
             payload = _layout(
